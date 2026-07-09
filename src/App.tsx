@@ -1,28 +1,65 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { applyBusinessRules } from './lib/jsonBuilder'
 import { statusCatalog as defaultStatusCatalog } from './lib/statusCatalog'
 import type { StatusOption } from './lib/types'
 import { isIsoCountryCode } from './lib/validators'
 
+const STORAGE_KEY = 'jsonRequestBuilderState'
+
 function App() {
+  const storedState = (() => {
+    if (typeof window === 'undefined') {
+      return null
+    }
+
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEY)
+      return raw ? JSON.parse(raw) : null
+    } catch {
+      return null
+    }
+  })()
+
   const [manualFields, setManualFields] = useState({
-    ProviderId: '',
-    ProviderName: '',
-    MockVariable: '',
-    AccountNumber: '',
-    CountryTo: '',
+    ProviderId: storedState?.manualFields?.ProviderId ?? '',
+    ProviderName: storedState?.manualFields?.ProviderName ?? '',
+    MockVariable: storedState?.manualFields?.MockVariable ?? '',
+    AccountNumber: storedState?.manualFields?.AccountNumber ?? '',
+    CountryTo: storedState?.manualFields?.CountryTo ?? '',
   })
   const [statusCatalog] = useState(defaultStatusCatalog)
   const [copyLabel, setCopyLabel] = useState('Copy JSON')
-  const [selectedStatus, setSelectedStatus] = useState(defaultStatusCatalog[0].code)
-  const [responseEntries, setResponseEntries] = useState<StatusOption[]>([])
+  const [selectedStatus, setSelectedStatus] = useState(storedState?.selectedStatus ?? defaultStatusCatalog[0].code)
+  const [responseEntries, setResponseEntries] = useState<StatusOption[]>(storedState?.responseEntries ?? [])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ manualFields, selectedStatus, responseEntries }),
+      )
+    } catch {
+      // ignore write failures
+    }
+  }, [manualFields, selectedStatus, responseEntries])
+
+  const sortByNumericCode = (a: StatusOption, b: StatusOption) => {
+    const aNum = Number(a.code)
+    const bNum = Number(b.code)
+
+    if (!Number.isNaN(aNum) && !Number.isNaN(bNum)) {
+      return aNum - bNum
+    }
+
+    return a.code.localeCompare(b.code)
+  }
 
   const preview = useMemo(() => {
     if (responseEntries.length === 0) {
       return null
     }
 
-    const activeEntries = responseEntries
+    const activeEntries = [...responseEntries].sort(sortByNumericCode)
 
     const payload = {
       ProviderId: manualFields.ProviderId || '101713611',
@@ -35,7 +72,7 @@ function App() {
         BeneficiaryAccountNumber: manualFields.AccountNumber || '50937007294',
         BeneficiaryFamilyName: '',
         BeneficiaryGivenNames: '',
-        ProviderStatusCode: entry.code,
+        ProviderStatusCode: entry.replace ?? entry.code,
         ProviderStatusDescription: entry.description,
       })),
     }
@@ -48,13 +85,21 @@ function App() {
       return []
     }
 
-    return preview.Responses.map((item) => ({
-      beneficiaryName: String(item.BeneficiaryAccountName ?? ''),
-      accountNumber: String(item.AccountNumber ?? ''),
-      statusCode: String(item.ProviderStatusCode ?? ''),
-      statusDescription: String(item.ProviderStatusDescription ?? ''),
-    }))
-  }, [preview])
+    const findNumericCode = (code: string) => {
+      const option = statusCatalog.find((entry) => entry.replace === code || entry.code === code)
+      return option?.code ?? code
+    }
+
+    return preview.Responses.map((item) => {
+      const displayCode = String(item.ProviderStatusCode ?? '')
+      return {
+        beneficiaryName: String(item.BeneficiaryAccountName ?? ''),
+        accountNumber: String(item.AccountNumber ?? ''),
+        statusDescription: String(item.ProviderStatusDescription ?? ''),
+        statusCode: findNumericCode(displayCode),
+      }
+    })
+  }, [preview, statusCatalog])
 
   const handleExport = () => {
     if (!preview) return
@@ -104,7 +149,7 @@ function App() {
       if (current.some((entry) => entry.code === selectedEntry.code)) {
         return current
       }
-      return [...current, selectedEntry]
+      return [...current, selectedEntry].sort(sortByNumericCode)
     })
   }
 
@@ -132,7 +177,10 @@ function App() {
                   <input
                     value={value}
                     maxLength={key === 'CountryTo' ? 2 : undefined}
-                    onChange={(event) => setManualFields((current) => ({ ...current, [key]: event.target.value }))}
+                    onChange={(event) => setManualFields((current) => ({
+                      ...current,
+                      [key]: event.target.value.toUpperCase(),
+                    }))}
                     className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-slate-100 outline-none transition focus:border-cyan-400"
                   />
                   {key === 'CountryTo' ? <span className="text-xs text-slate-400">Use exactly 2 ISO letters, such as HT.</span> : null}
@@ -222,8 +270,8 @@ function App() {
                 <table className="min-w-full divide-y divide-slate-800 text-sm text-slate-100">
                   <thead className="bg-slate-900/90 text-left text-slate-300">
                     <tr>
-                      <th className="px-4 py-3 font-semibold">Account Number</th>
                       <th className="px-4 py-3 font-semibold">Beneficiary Name</th>
+                      <th className="px-4 py-3 font-semibold">Account Number</th>
                       <th className="px-4 py-3 font-semibold">statusDescription</th>
                       <th className="px-4 py-3 font-semibold">statusCode</th>
                     </tr>
@@ -231,8 +279,8 @@ function App() {
                   <tbody className="divide-y divide-slate-800">
                     {mockRows.map((row, index) => (
                       <tr key={`${row.accountNumber}-${row.statusCode}-${index}`} className="hover:bg-slate-900/80">
-                        <td className="px-4 py-3">{row.accountNumber}</td>
                         <td className="px-4 py-3">{row.beneficiaryName}</td>
+                        <td className="px-4 py-3">{row.accountNumber}</td>
                         <td className="px-4 py-3">{row.statusDescription}</td>
                         <td className="px-4 py-3">{row.statusCode}</td>
                       </tr>

@@ -8,6 +8,7 @@ export interface ManualFields {
 
 export interface StatusOption {
   code: string
+  replace?: string
   description: string
 }
 

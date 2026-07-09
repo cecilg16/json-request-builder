@@ -33,18 +33,18 @@ export function extractStatusOptions(payload: JsonRequestPayload): StatusOption[
 }
 
 function deriveAccountNumber(baseAccountNumber: string | number, statusCode: string): string {
-  const digits = String(baseAccountNumber ?? '').replace(/\D/g, '')
+  const cleaned = String(baseAccountNumber ?? '').replace(/[^a-zA-Z0-9]/g, '')
   const suffix = String(statusCode ?? '').replace(/\D/g, '').padStart(3, '0').slice(-3)
 
-  if (!digits) {
+  if (!cleaned) {
     return ''
   }
 
-  if (digits.length <= 3) {
-    return suffix
+  if (cleaned.length <= 3) {
+    return `${cleaned}${suffix}`
   }
 
-  return `${digits.slice(0, -3)}${suffix}`
+  return `${cleaned.slice(0, -3)}${suffix}`
 }
 
 export function applyBusinessRules(
@@ -63,17 +63,24 @@ export function applyBusinessRules(
     ? payload.Responses.map((item) => ({ ...item }))
     : []
 
-  const statusMap = new Map((selectedStatusCodes ?? []).map((entry) => [entry.code, entry]))
+  const statusMap = new Map<string, StatusOption>()
+  ;(selectedStatusCodes ?? []).forEach((entry) => {
+    statusMap.set(entry.code, entry)
+    if (entry.replace) {
+      statusMap.set(entry.replace, entry)
+    }
+  })
+
   const generatedNames = generateUniqueNames(responses.length)
 
   responses.forEach((item, index) => {
     const selected = statusMap.get(String(item.ProviderStatusCode ?? ''))
     if (selected) {
-      item.ProviderStatusCode = selected.code
+      item.ProviderStatusCode = selected.replace ?? selected.code
       item.ProviderStatusDescription = selected.description
     }
 
-    const statusCode = String(item.ProviderStatusCode ?? '')
+    const statusCode = selected?.code ?? String(item.ProviderStatusCode ?? '').replace(/\D/g, '')
     const accountNumber = deriveAccountNumber(manualFields.AccountNumber || item.AccountNumber || '', statusCode)
     const generatedName = generatedNames[index] ?? generateUniqueNames(1)[0]
 
